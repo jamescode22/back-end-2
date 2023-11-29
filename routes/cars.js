@@ -1,70 +1,100 @@
 const express = require("express");
+const dbQuery = require("../controllers/mysql");
 const router = express.Router();
 
-const cars = [
-  { id: 2323, make: "skoda", model: "octavia" },
-  { id: 5542, make: "ford", model: "fiesta" },
-  { id: 3464, make: "volkswagen", model: "golf" },
-];
-
-// routes for /cars
+// Check that there is a valid row in the makes_and_models table with the passed id.
+const checkValidID = async (id) => {
+  try {
+    const _car = await dbQuery(`SELECT * FROM makes_and_models WHERE id=${Number(id)}`);
+    if (_car && _car.length === 0) {
+      throw new Error("Row not found.", { cause: { httpCode: 404 } });
+    }
+  } catch (e) {
+    // rethrow the error
+    throw e;
+  }
+};
 
 // GET / - return all cars
-router.get("/", (req, res) => {
-  res.json(cars);
+
+router.get("/", async (req, res) => {
+  try {
+    const _cars = await dbQuery("SELECT * FROM makes_and_models");
+    res.json(_cars);
+  } catch (e) {
+    res.status(e?.cause?.httpCode || 500).send(e.message);
+  }
 });
 
 // GET /id - return the car with id matching parameter
-router.get("/:carId", (req, res) => {
-  const _car = cars.find((car) => car.id === Number(req.params.carId));
-  if (!_car) return res.sendStatus(404);
-  res.json(_car);
+router.get("/:carId", async (req, res) => {
+  try {
+    const id = Number(req.params.carId);
+
+    await checkValidID(id);
+    const _car = await dbQuery(`SELECT * FROM makes_and_models WHERE id=${id}`);
+    res.json(_car[0]);
+  } catch (e) {
+    res.status(e?.cause?.httpCode || 500).send(e.message);
+  }
 });
 
 // POST - takes a JSON object with make and model and
 // adds to the array.  Creates a new random ID.
-router.post("/", (req, res) => {
-  const { make, model } = req.body;
-  // if missing data, quit
-  if (!make || !model) return res.status(400).send("missing data");
+router.post("/", async (req, res) => {
+  try {
+    const { make, model } = req.body;
 
-  // check for duplicates
-  if (cars.findIndex((car) => car.make === make && car.model === model) !== -1)
-    return res.status(400).send("duplicate data");
+    // Validata data
+    if (!make || !model) throw new Error("Missing data", { cause: { httpCode: 400 } });
+    if (make.length >= 255 || model.length >= 255)
+      throw new Error("Invalid data", { cause: { httpCode: 400 } });
 
-  cars.push({ id: Math.round(Math.random() * 10000), make, model });
-  return res.sendStatus(201);
+    // check for duplicate
+    const _car = await dbQuery(
+      `SELECT * FROM makes_and_models WHERE make LIKE '${make}' AND model LIKE '${model}'`
+    );
+    if (_car && _car.length > 0) throw new Error("Duplicate data", { cause: { httpCode: 400 } });
+
+    await dbQuery(
+      `INSERT INTO makes_and_models (id, make, model) VALUES (NULL, '${make}', '${model}')`
+    );
+
+    return res.sendStatus(201);
+  } catch (e) {
+    res.status(e?.cause?.httpCode || 500).send(e.message);
+  }
 });
 
 // PUT - takes a JSON object with id, make and model and updates
 // the record.
-router.put("/:carsId", (req, res) => {
-  const { carsId } = req.params;
-  const { make, model } = req.body;
+router.put("/:carId", async (req, res) => {
+  try {
+    const id = Number(req.params.carId);
+    const { make, model } = req.body;
 
-  if (!make || !model || !carsId) return res.status(400).send("missing data");
+    if (!make || !model || !id) throw new Error("Missing data", { cause: { httpCode: 400 } });
 
-  // get the index of this car
-  const _carIndex = cars.findIndex((car) => car.id === Number(carsId));
-
-  if (_carIndex === -1) return res.sendStatus(404);
-
-  // do the update
-  cars[_carIndex].make = make;
-  cars[_carIndex].model = model;
-  return res.sendStatus(201);
+    await checkValidID(id);
+    await dbQuery(
+      `UPDATE makes_and_models SET make = '${make}', model = '${model}' WHERE id = ${id}`
+    );
+    return res.sendStatus(201);
+  } catch (e) {
+    res.status(e?.cause?.httpCode || 500).send(e.message);
+  }
 });
 
 // DELETE
-router.delete("/:carId", (req, res) => {
-  const { carId } = req.params;
-  const _carIndex = cars.findIndex((car) => car.id === Number(carId));
-
-  if (_carIndex === -1) return res.sendStatus(404);
-
-  // do the deletion
-  cars.splice(_carIndex, 1);
-  return res.sendStatus(200);
+router.delete("/:carId", async (req, res) => {
+  try {
+    const id = Number(req.params.carId);
+    await checkValidID(id);
+    await dbQuery(`DELETE FROM makes_and_models WHERE id = ${id}`);
+    return res.sendStatus(200);
+  } catch (e) {
+    res.status(e?.cause?.httpCode || 500).send(e.message);
+  }
 });
 
 module.exports = router;
